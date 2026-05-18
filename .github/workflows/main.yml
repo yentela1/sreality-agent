@@ -1,0 +1,7 @@
+name: enable
+on: [push]
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
