@@ -1,4 +1,4 @@
-import os, json, requests, smtplib
+import os, json, requests, smtplib 
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import date
@@ -112,8 +112,8 @@ def send(html, count):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         s.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
-    print(f"Sent: {subj}")
-
+print(f"Claude response: {text[:500]}")
+return json.loads(text)
 def main():
     seen = load_seen()
     sections = []
