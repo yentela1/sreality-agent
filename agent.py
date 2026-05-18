@@ -53,7 +53,7 @@ INVESTMENT_PROMPT = """אתה יועץ נדל"ן מומחה בפראג. משקי
 - תיאור מציין שיפוץ / מצב טוב — +15
 - מחיר למ"ר מתחת ל-100,000 CZK — +10
 
-החזר JSON בלבד (ללא markdown):
+החזר JSON בלבד ללא markdown:
 [{"index":1,"investmentScore":78,"pricePerM2":95000,"estimatedRent":12000,"grossYield":2.4,"pros":["קומה 3"],"cons":["אין מרפסת"],"foreignInvestorNote":"הערה","analysis":"ניתוח"}]"""
 
 
@@ -81,11 +81,11 @@ def get_price(listing):
     return 0
 
 
-def get_str(obj, key="value", default=""):
+def get_str(obj, default=""):
     if obj is None:
         return default
     if isinstance(obj, dict):
-        return str(obj.get(key, default))
+        return str(obj.get("value", default))
     return str(obj)
 
 
@@ -108,7 +108,11 @@ def fetch_listings(search):
         else:
             params.append((k, v))
     url = "https://www.sreality.cz/api/cs/v2/estates"
-    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": "https://www.sreality.cz/"}
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Referer": "https://www.sreality.cz/"
+    }
     r = requests.get(url, params=params, headers=headers, timeout=15)
     r.raise_for_status()
     data = r.json()
@@ -125,17 +129,27 @@ def analyze_with_claude(listings, label):
         name = get_str(l.get("name"), default="דירה")
         locality = get_str(l.get("locality"), default="")
         desc = str(l.get("perex", "") or "")[:150]
-        summaries.append(f"{i+1}. \"{name}\" | {locality} | {price:,} CZK | {area}m² | קומה {floor} | {desc}")
+        summaries.append(
+            f"{i+1}. \"{name}\" | {locality} | {price:,} CZK | {area}m² | קומה {floor} | {desc}"
+        )
 
     payload = {
         "model": "claude-sonnet-4-20250514",
         "max_tokens": 2000,
-        "messages": [{"role": "user", "content": INVESTMENT_PROMPT + f"\n\nקבוצה: {label}\n\n" + "\n".join(summaries)}]
+        "messages": [{
+            "role": "user",
+            "content": INVESTMENT_PROMPT + f"\n\nקבוצה: {label}\n\n" + "\n".join(summaries)
+        }]
     }
     r = requests.post(
         "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-        json=payload, timeout=60
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=60
     )
     r.raise_for_status()
     text = r.json()["content"][0]["text"].replace("```json", "").replace("```", "").strip()
@@ -168,8 +182,17 @@ def build_html_email(sections):
               </div>
               <div style="font-size:13px;color:#555;margin-bottom:10px;">{c.get('locality','')}</div>
               <table style="width:100%;font-size:13px;">
-                <tr><td style="color:#777;">מחיר למ"ר</td><td>{int(c.get('pricePerM2',0)):,} CZK</td><td style="color:#777;">שכ"ד משוער</td><td>{int(c.get('estimatedRent',0)):,} CZK/חודש</td></tr>
-                <tr><td style="color:#777;">תשואה ברוטו</td><td>{c.get('grossYield',0)}%</td><td></td><td></td></tr>
+                <tr>
+                  <td style="color:#777;">מחיר למ"ר</td>
+                  <td>{int(c.get('pricePerM2',0)):,} CZK</td>
+                  <td style="color:#777;">שכ"ד משוער</td>
+                  <td>{int(c.get('estimatedRent',0)):,} CZK/חודש</td>
+                </tr>
+                <tr>
+                  <td style="color:#777;">תשואה ברוטו</td>
+                  <td>{c.get('grossYield',0)}%</td>
+                  <td></td><td></td>
+                </tr>
               </table>
               <div style="margin-top:10px;font-size:13px;">{c.get('analysis','')}</div>
               <div style="margin-top:8px;font-size:13px;color:#2e7d32;">✔ {' | '.join(c.get('pros',[]))}</div>
@@ -179,11 +202,13 @@ def build_html_email(sections):
             </div>"""
 
     body = cards_html if cards_html else '<p style="font-family:sans-serif;direction:rtl;">לא נמצאו דירות חדשות היום.</p>'
-    return f"""<html><body style="background:#f9f9f9;padding:24px;"><div style="max-width:600px;margin:0 auto;">
-      <h1 style="font-family:sans-serif;font-size:20px;direction:rtl;">דוח דירות להשקעה — {today}</h1>
-      {body}
-      <p style="font-family:sans-serif;font-size:11px;color:#aaa;direction:rtl;">נשלח אוטומטית על ידי Sreality Investment Agent</p>
-    </div></body></html>"""
+    return f"""<html><body style="background:#f9f9f9;padding:24px;">
+      <div style="max-width:600px;margin:0 auto;">
+        <h1 style="font-family:sans-serif;font-size:20px;direction:rtl;">דוח דירות להשקעה — {today}</h1>
+        {body}
+        <p style="font-family:sans-serif;font-size:11px;color:#aaa;direction:rtl;">נשלח אוטומטית על ידי Sreality Investment Agent</p>
+      </div>
+    </body></html>"""
 
 
 def send_email(html, new_count):
