@@ -1,4 +1,4 @@
-import os, json, requests, smtplib 
+import os, json, requests, smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import date
@@ -14,11 +14,9 @@ SEARCHES = [
     {"label": "קרלין / סמיחוב / נוסלה — 2+kk", "sub": 3, "regions": [5003, 5009, 5013]},
 ]
 
-PROMPT = """אתה יועץ נדל"ן בפראג. החזר JSON בלבד ללא markdown, מערך של אובייקטים:
+PROMPT = """אתה יועץ נדל"ן בפראג. החזר JSON בלבד ללא markdown:
 [{"index":1,"investmentScore":75,"pricePerM2":95000,"estimatedRent":12000,"grossYield":2.4,"pros":["יתרון"],"cons":["חסרון"],"foreignInvestorNote":"הערה","analysis":"ניתוח"}]
-
-כללים: קומה 0 מוריד 25 נקודות. מחיר מעל 130000 למ"ר מוריד 20. קומה 2-4 עם מעלית מוסיף 10. שיפוץ מוסיף 15."""
-
+כללים: קומה 0 מוריד 25. מחיר מעל 130000 למ"ר מוריד 20. קומה 2-4 עם מעלית מוסיף 10. שיפוץ מוסיף 15."""
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -31,15 +29,18 @@ def save_seen(ids):
         json.dump(list(ids), f)
 
 def val(obj, default=""):
-    if isinstance(obj, dict):
-        return str(obj.get("value", default))
-    return str(obj) if obj else default
+    if obj is None: return default
+    if isinstance(obj, dict): return str(obj.get("value", default))
+    return str(obj)
 
 def get_price(l):
     p = l.get("price")
+    if p is None: return 0
+    if isinstance(p, (int, float)): return int(p)
     if isinstance(p, dict):
-        return int(p.get("value_raw") or 0)
-    return int(p or 0)
+        v = p.get("value_raw") or p.get("value") or 0
+        return int(v)
+    return 0
 
 def get_label(l, key):
     for x in (l.get("labelsReplaced") or []):
@@ -53,7 +54,8 @@ def fetch(search):
     for r in search["regions"]:
         params.append(("region_entity_id", r))
     r = requests.get("https://www.sreality.cz/api/cs/v2/estates", params=params,
-                     headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"}, timeout=15)
+        headers={"User-Agent":"Mozilla/5.0","Accept":"application/json","Referer":"https://www.sreality.cz/"},
+        timeout=15)
     r.raise_for_status()
     emb = r.json().get("_embedded", {})
     return emb.get("estates", []) if isinstance(emb, dict) else []
@@ -61,14 +63,19 @@ def fetch(search):
 def analyze(listings, label):
     rows = []
     for i, l in enumerate(listings):
-        rows.append(f"{i+1}. {val(l.get('name'),'דירה')} | {val(l.get('locality'))} | {get_price(l):,} CZK | {get_label(l,'usable_area')}m2 | קומה {get_label(l,'floor_number')} | {str(l.get('perex','') or '')[:120]}")
+        try:
+            row = f"{i+1}. {val(l.get('name'),'דירה')} | {val(l.get('locality'))} | {get_price(l):,} CZK | {get_label(l,'usable_area')}m2 | קומה {get_label(l,'floor_number')} | {str(l.get('perex') or '')[:120]}"
+        except Exception as e:
+            row = f"{i+1}. דירה | שגיאה {e}"
+        rows.append(row)
     body = {"model":"claude-sonnet-4-20250514","max_tokens":2000,
             "messages":[{"role":"user","content":PROMPT+f"\n\nקבוצה: {label}\n\n"+"\n".join(rows)}]}
     r = requests.post("https://api.anthropic.com/v1/messages",
-                      headers={"x-api-key":ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","Content-Type":"application/json"},
-                      json=body, timeout=60)
+        headers={"x-api-key":ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","Content-Type":"application/json"},
+        json=body, timeout=60)
     r.raise_for_status()
     text = r.json()["content"][0]["text"].replace("```json","").replace("```","").strip()
+    print(f"Claude: {text[:200]}")
     return json.loads(text)
 
 def color(score):
@@ -84,19 +91,7 @@ def make_email(sections):
         body += f'<h2 style="direction:rtl;font-family:sans-serif;">{lbl}</h2>'
         for c in cards:
             tc,bc = color(c.get("investmentScore",0))
-            body += f'''<div style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px;margin-bottom:12px;direction:rtl;font-family:sans-serif;">
-<div style="display:flex;justify-content:space-between;">
-  <strong>{c.get("name","דירה")}</strong>
-  <span style="background:{bc};color:{tc};padding:3px 10px;border-radius:20px;">{c.get("investmentScore",0)}/100</span>
-</div>
-<div style="color:#555;font-size:13px;">{c.get("locality","")}</div>
-<div style="font-size:13px;margin-top:8px;">מחיר למ"ר: {int(c.get("pricePerM2",0)):,} CZK | שכ"ד: {int(c.get("estimatedRent",0)):,} CZK | תשואה: {c.get("grossYield",0)}%</div>
-<div style="margin-top:8px;font-size:13px;">{c.get("analysis","")}</div>
-<div style="color:#2e7d32;font-size:13px;">✔ {" | ".join(c.get("pros",[]))}</div>
-<div style="color:#c62828;font-size:13px;">✘ {" | ".join(c.get("cons",[]))}</div>
-<div style="background:#f5f5f5;border-radius:6px;padding:8px;font-size:12px;margin-top:6px;">💡 {c.get("foreignInvestorNote","")}</div>
-<a href="{c.get("url","#")}" style="font-size:13px;color:#1565c0;">פתח ב-Sreality ↗</a>
-</div>'''
+            body += f'<div style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px;margin-bottom:12px;direction:rtl;font-family:sans-serif;"><div style="display:flex;justify-content:space-between;"><strong>{c.get("name","דירה")}</strong><span style="background:{bc};color:{tc};padding:3px 10px;border-radius:20px;">{c.get("investmentScore",0)}/100</span></div><div style="color:#555;font-size:13px;">{c.get("locality","")}</div><div style="font-size:13px;margin-top:8px;">מחיר למ&quot;ר: {int(c.get("pricePerM2",0)):,} | שכ&quot;ד: {int(c.get("estimatedRent",0)):,} CZK | תשואה: {c.get("grossYield",0)}%</div><div style="margin-top:8px;font-size:13px;">{c.get("analysis","")}</div><div style="color:#2e7d32;font-size:13px;">✔ {" | ".join(c.get("pros",[]))}</div><div style="color:#c62828;font-size:13px;">✘ {" | ".join(c.get("cons",[]))}</div><div style="background:#f5f5f5;border-radius:6px;padding:8px;font-size:12px;margin-top:6px;">💡 {c.get("foreignInvestorNote","")}</div><a href="{c.get("url","#")}" style="font-size:13px;color:#1565c0;">פתח ב-Sreality</a></div>'
     if not body:
         body = '<p style="direction:rtl;font-family:sans-serif;">לא נמצאו דירות חדשות היום.</p>'
     return f'<html><body style="background:#f9f9f9;padding:24px;"><div style="max-width:600px;margin:0 auto;"><h1 style="direction:rtl;font-family:sans-serif;">דוח דירות להשקעה — {today}</h1>{body}</div></body></html>'
@@ -112,8 +107,8 @@ def send(html, count):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         s.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
-print(f"Claude response: {text[:500]}")
-return json.loads(text)
+    print(f"Sent: {subj}")
+
 def main():
     seen = load_seen()
     sections = []
