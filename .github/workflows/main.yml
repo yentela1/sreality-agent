@@ -1,4 +1,4 @@
-name: Sreality Daily Agent
+name: Sreality Daily Agent 
 
 on:
   schedule:
