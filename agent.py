@@ -106,7 +106,8 @@ def fetch_listings(search):
 def analyze_with_claude(listings, label):
     summaries = []
     for i, l in enumerate(listings):
-        price = l.get("price", {}).get("value_raw", 0)
+        price_raw = l.get("price", {})
+price = price_raw.get("value_raw", 0) if isinstance(price_raw, dict) else int(price_raw) if price_raw else 0
         labels = {x["key"]: x["value"] for x in l.get("labelsReplaced", [])}
         area = labels.get("usable_area", "?")
         floor = labels.get("floor_number", "?")
